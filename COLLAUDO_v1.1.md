@@ -9,8 +9,8 @@ Tutto quello che non è ancora stato misurato è scritto come `____` da compilar
    - accedi a huggingface.co → apri <https://huggingface.co/Lightricks/LTX-2.5> → *Agree and Access* (l'approvazione è automatica, secondo il campo `gated: auto` del repo)
    - Settings → Access Tokens → nuovo token di tipo **Read**
    - Tienilo nel password manager. Lo script te lo chiederà **sull'istanza, in modo nascosto**, e lo salverà in `~/.hf_config` (chmod 600). Non va incollato in chat.
-2. **Disco**: l'istanza Thunder ha 100 GB di default (da documentazione Thunder, non l'ho verificato dal pannello). Il collaudo completo scarica ~170 GB:
-   FLUX 17 + Wan 2.2 (T2V+I2V) 69 + LTX-2.5 40 + HunyuanVideo 1.5 47. Crea l'istanza con **almeno 200 GB** (o ridimensiona il disco; a quanto leggo i dischi si possono solo ingrandire).
+2. **Disco**: l'istanza Thunder ha 100 GB di default (da documentazione Thunder, non l'ho verificato dal pannello). Il collaudo completo scarica ~126 GB:
+   FLUX 17 + Wan 2.2 (T2V+I2V) 69 + LTX-2.5 40. Crea l'istanza con **almeno 150 GB** (o ridimensiona il disco; a quanto leggo i dischi si possono solo ingrandire).
 3. GPU: **RTX A6000 48 GB**. Se vedi un'altra GPU nel listino dimmelo: la fascia VRAM cambia.
 
 ## 1. Pre-controllo (2 minuti, non installa nulla)
@@ -27,6 +27,12 @@ Controlla:
 - nel `VERIFY_ONLY` tutte le righe ✅ tranne LTX (❌ 401 senza token: normale, lo risolvi al passo 2c)
 - se un URL che non è LTX è ❌ **fermati e mandami l'output**
 
+> **Licenze (verificate il 5 nov 2026, non è consulenza legale).**
+> - **Wan 2.2**: Apache 2.0, nessun divieto sui contenuti per adulti legali. È il modello principale.
+> - **LTX-2.5**: la licenza incorpora la Acceptable Use Policy di Lightricks (agg. 3 nov 2026), che vieta di generare contenuti sessualmente espliciti e di aggirare filtri o watermark. Provalo solo con prompt non espliciti.
+> - **HunyuanVideo 1.5**: la licenza Tencent **non si applica in UE, Regno Unito e Corea del Sud** (e vieta l'uso dei risultati fuori dal territorio). **Escluso dal collaudo** e dallo script (si sblocca solo con `HUNYUAN_TERRITORY_OK=1`, che per te non vale).
+> - **FLUX.1-dev**: solo uso non commerciale; vieta minori e immagini intime senza consenso.
+
 ## 2. Installazione, un modello alla volta (così misuri il disco di ciascuno)
 
 Per ogni passo: lancia con `time`, poi `bash ~/report_setup.sh` e annota "TOTALE modelli".
@@ -42,9 +48,6 @@ time VIDEO_MODELS=wan bash ~/sup1_c.sh
 # 2c — LTX-2.5 (ti chiede il token HF, nascosto)
 time VIDEO_MODELS=ltx bash ~/sup1_c.sh
 bash ~/report_setup.sh
-
-# 2d — HunyuanVideo 1.5
-time VIDEO_MODELS=hunyuan bash ~/sup1_c.sh
 bash ~/report_setup.sh
 
 bash ~/check_setup.sh                    # tutto ✅?
@@ -53,13 +56,12 @@ bash ~/check_setup.sh                    # tutto ✅?
 Controlla:
 - alla fine di ogni run: `✅ Nessun errore` e nessun gruppo in "Gruppi saltati"
 - 2b: nessuna riga `⬇️`, solo `già presente`
-- il totale disco di 2a/2c/2d rispetto alle stime (Wan ~69 GB + FLUX 17 = ~86 GB; LTX ~40; Hunyuan ~47)
+- il totale disco di 2a/2c/2d rispetto alle stime (Wan ~69 GB + FLUX 17 = ~86 GB; LTX ~40)
 
 | Passo | Tempo setup | Disco aggiunto |
 |---|---|---|
 | 2a Wan 2.2 + FLUX + ComfyUI | ____ | ____ GB |
 | 2c LTX-2.5 | ____ | ____ GB |
-| 2d HunyuanVideo 1.5 | ____ | ____ GB |
 
 ## 3. Avvio ComfyUI
 
@@ -72,10 +74,10 @@ bash ~/start_comfy.sh                    # log in ~/comfy.log
 
 Apri ComfyUI come fai di solito (porta 8188). Menu **Workflow → Browse Templates → Video**. Se un template non c'è, aggiorna ComfyUI (`UPDATE_COMFY=1` è già il default: rilancia lo script) e riavvia.
 
-## 4. Prove di generazione (6 prove: T2V e I2V per ogni modello)
+## 4. Prove di generazione (4 prove: T2V e I2V per Wan 2.2 e per LTX-2.5)
 
 Regole uguali per tutte, per confrontare i tempi:
-- **Clip da 5 secondi**: frame = 5 × fps + 1. Wan 2.2: 16 fps → **81 frame**. LTX-2.5 e HunyuanVideo 1.5: se il template usa 24 fps → **121 frame**. Se un template propone un altro fps usa 5 × fps + 1 e rispetta il vincolo del modello (Wan 4n+1; LTX 8n+1; Hunyuan 4n+1: 81 e 121 vanno bene). Annota fps e frame effettivi.
+- **Clip da 5 secondi**: frame = 5 × fps + 1. Wan 2.2: 16 fps → **81 frame**. LTX-2.5: se il template usa 24 fps → **121 frame** (vincolo LTX 8n+1). Se un template propone un altro fps usa 5 × fps + 1 e rispetta il vincolo del modello. Annota fps e frame effettivi.
 - Risoluzione: quella di default del template (annotala). Poi, se vuoi, una seconda prova a 720p.
 - Prompt semplice e SFW per il collaudo tecnico (es. «una donna cammina su una spiaggia al tramonto, camera che la segue»). Per l'I2V usa un'immagine FLUX generata da te nello stesso ComfyUI (così provi anche FLUX).
 - **Ogni prova due volte** cambiando solo il seed: la prima include il caricamento del modello (**freddo**), la seconda è il tempo di regime (**caldo**). Per i costi uso il caldo.
@@ -87,8 +89,6 @@ Regole uguali per tutte, per confrontare i tempi:
 | 2 | Wan 2.2 14B I2V (`video_wan2_2_14B_i2v`) | `wan2.2_i2v_*_fp8_scaled` |
 | 3 | LTX-2.5 T2V (`video_ltx2_5_t2v`) | LTX-2.5 distilled int8 |
 | 4 | LTX-2.5 I2V (`video_ltx2_5_i2v`) | idem |
-| 5 | HunyuanVideo 1.5 720p T2V (`video_hunyuan_video_1.5_720p_t2v`) | `hunyuanvideo1.5_720p_t2v_fp16` |
-| 6 | HunyuanVideo 1.5 720p I2V (`video_hunyuan_video_1.5_720p_i2v`) | `hunyuanvideo1.5_720p_i2v_fp16` |
 
 **Nota sui template Wan e i LoRA lightx2v.** [MISURATO sui template installati, comfyui_workflow_templates_json 0.11.96, letti il 5 nov 2026] i template `video_wan2_2_14B_t2v` e `video_wan2_2_14B_i2v` contengono già due nodi `LoraLoaderModelOnly` con i LoRA lightx2v 4 step (forza 1.0), e i file del template coincidono con i nomi del manifest: diffusione `wan2.2_{i2v,t2v}_{high,low}_noise_14B_fp8_scaled`, LoRA `wan2.2_i2v_lightx2v_4steps_lora_v1_{high,low}_noise` e `wan2.2_t2v_lightx2v_4steps_lora_v1.1_{high,low}_noise`, text encoder `umt5_xxl_fp8_e4m3fn_scaled`, VAE `wan_2.1_vae`. Quindi la prova «veloce» è il template **così com'è**. Parametri letti nei JSON dei template (0.11.96) [MISURATO]: 14B I2V e T2V: latente **640×640, 81 frame, 16 fps** (= 5 s), `ModelSamplingSD3` shift 5, due campionatori `KSamplerAdvanced` con **4 step, cfg 1, euler/simple**: high-noise da step 0 a 2 (con rumore residuo), low-noise da step 2 alla fine (nell'I2V il campo «end» risulta «1» nel JSON: probabile residuo, controlla a schermo che il ramo low arrivi fino in fondo). 5B TI2V (senza LoRA): **1280×704, 121 frame, 24 fps** (= 5 s), shift 8, 20 step, cfg 5, uni_pc/simple. Per confrontare i tempi con le altre prove, alza la risoluzione solo dopo aver annotato quella di default. La prova «di base» (senza LoRA) è facoltativa: bypassa i due nodi LoRA e usa gli step e il cfg consigliati nelle note del template; se non li trovi, salta quella riga: il tempo che conta per i costi è quello con i LoRA. (La pagina docs.comfy.org su Wan 2.2 cita per l'I2V i file fp16, ma il template reale usa fp8_scaled.)
 
@@ -102,8 +102,6 @@ Compila (una riga per prova):
 | 2 base, facoltativa (LoRA bypassati) | | | | | | | |
 | 3 | | | | | | | |
 | 4 | | | | | | | |
-| 5 | | | | | | | |
-| 6 | | | | | | | |
 
 Picco VRAM dopo ogni prova: `sort -n -r ~/vram.csv | head -1` (poi `: > ~/vram.csv` per azzerare).
 
@@ -132,7 +130,7 @@ Aggiungi una quota per setup/idle se vuoi il costo reale per sessione. Con i tuo
 
 - [ ] `VERIFY_ONLY` tutto ✅ (LTX ✅ con token)
 - [ ] Installazione senza errori, rilancio identico senza riscaricare nulla
-- [ ] Almeno una prova T2V e una I2V funzionanti per **Wan 2.2**; per LTX-2.5 e HunyuanVideo 1.5 funzionanti oppure motivo del fallimento annotato
+- [ ] Almeno una prova T2V e una I2V funzionanti per **Wan 2.2**; per LTX-2.5 funzionanti (con prompt non espliciti) oppure motivo del fallimento annotato
 - [ ] Tempi caldi e disco misurati per ogni modello
 - [ ] Save/load workflow funzionante, token solo in `~/.github_config` (600)
 

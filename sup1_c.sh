@@ -11,6 +11,15 @@
 # VARIABILI (si passano davanti a bash, es.:  curl ... | VIDEO_MODELS=wan bash )
 #   VIDEO_MODELS   auto (default) | none | all | lista separata da virgole di:
 #                  wan_t2v, wan_i2v, wan (=entrambi), wan5b, ltx, hunyuan
+#                  auto = Wan 2.2 (T2V+I2V) a tutte le fasce. «all» = Wan 2.2 + LTX-2.5.
+#   LICENZE (verificate il 5 nov 2026, non è consulenza legale):
+#     - Wan 2.2: Apache 2.0.
+#     - LTX-2.5: la licenza incorpora la Acceptable Use Policy di Lightricks (agg. 3 nov 2026), che vieta di
+#       generare contenuti sessualmente espliciti; vieta anche di aggirare filtri/watermark. Solo su richiesta esplicita.
+#     - HunyuanVideo 1.5: la licenza Tencent NON si applica in UE, Regno Unito e Corea del Sud (e vieta l'uso dei
+#       risultati fuori dal «Territory»). Non è incluso in auto/all; si scarica solo con VIDEO_MODELS=hunyuan
+#       HUNYUAN_TERRITORY_OK=1, sotto tua responsabilità e solo se sei FUORI da quei territori.
+#     - FLUX.1-dev: solo uso non commerciale; vieta contenuti illegali (minori, immagini intime senza consenso).
 #   SKIP_FLUX=1    non scarica FLUX.1-dev FP8 (17 GB)
 #   MARGIN_GB=10   spazio libero da lasciare dopo ogni gruppo di modelli
 #   UPDATE_COMFY=0 non aggiorna ComfyUI/custom nodes se già installati
@@ -159,7 +168,7 @@ define_models() {
     add_file ltx vae ltx-2.5-audio-vae-bf16.safetensors 0.36 1 "$LTX/vae/ltx-2.5-audio-vae-bf16.safetensors"
     add_file ltx latent_upscale_models ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors 1.0 1 "$LTX/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
 
-    # ── [F8-HUNYUAN] HunyuanVideo 1.5 (sostituisce HunyuanVideo 1.0 + FramePack).
+    # ── [F8-HUNYUAN] HunyuanVideo 1.5 — NON utilizzabile in UE/UK/Corea del Sud (licenza Tencent, Territory). Solo con HUNYUAN_TERRITORY_OK=1.
     #    File uguali a quelli dei template ufficiali ComfyUI (video_hunyuan_video_1.5_720p_t2v / _i2v).
     add_file hunyuan diffusion_models hunyuanvideo1.5_720p_t2v_fp16.safetensors 16.65 0 "$HY15/diffusion_models/hunyuanvideo1.5_720p_t2v_fp16.safetensors"
     add_file hunyuan diffusion_models hunyuanvideo1.5_720p_i2v_fp16.safetensors 16.65 0 "$HY15/diffusion_models/hunyuanvideo1.5_720p_i2v_fp16.safetensors"
@@ -178,14 +187,14 @@ resolve_selection() {
     fi
     sel="${sel// /}"
     if [ "$sel" = "auto" ]; then
+        # Per ora Wan 2.2 (Apache 2.0) a tutte le fasce: LTX-2.5 (AUP: niente contenuti espliciti, repo gated)
+        # e HunyuanVideo 1.5 (non utilizzabile in UE) restano solo su richiesta esplicita.
         case "$TIER" in
-            24) sel="wan_i2v,wan_t2v" ;;
-            48) sel="wan_i2v,wan_t2v,ltx" ;;
-            *)  sel="wan_i2v,wan_t2v,ltx,hunyuan" ;;
+            *) sel="wan_i2v,wan_t2v" ;;
         esac
     fi
     sel=",${sel},"
-    sel="${sel//,all,/,wan_i2v,wan_t2v,ltx,hunyuan,}"
+    sel="${sel//,all,/,wan_i2v,wan_t2v,ltx,}"
     sel="${sel//,wan,/,wan_i2v,wan_t2v,}"
     sel="${sel//,none,/,}"
     SELECTED=()
@@ -195,6 +204,15 @@ resolve_selection() {
     done
     sel="${sel#,}"; sel="${sel%,}"
     [ -n "$sel" ] && warn "Nomi in VIDEO_MODELS non riconosciuti (ignorati): $sel"
+    if in_selected hunyuan && [ "${HUNYUAN_TERRITORY_OK:-0}" != "1" ]; then
+        warn "HunyuanVideo 1.5 SALTATO: la licenza Tencent esclude UE, Regno Unito e Corea del Sud."
+        warn "Se sei fuori da quei territori: HUNYUAN_TERRITORY_OK=1 VIDEO_MODELS=hunyuan"
+        local rest=() c2; for c2 in "${SELECTED[@]}"; do [ "$c2" = "hunyuan" ] || rest+=("$c2"); done
+        SELECTED=("${rest[@]+"${rest[@]}"}")
+    fi
+    if in_selected ltx; then
+        warn "LTX-2.5: la licenza (AUP Lightricks, 3 nov 2026) vieta contenuti sessualmente espliciti e l'elusione di filtri/watermark."
+    fi
     return 0
 }
 
