@@ -90,16 +90,16 @@ Regole uguali per tutte, per confrontare i tempi:
 | 5 | HunyuanVideo 1.5 720p T2V (`video_hunyuan_video_1.5_720p_t2v`) | `hunyuanvideo1.5_720p_t2v_fp16` |
 | 6 | HunyuanVideo 1.5 720p I2V (`video_hunyuan_video_1.5_720p_i2v`) | `hunyuanvideo1.5_720p_i2v_fp16` |
 
-**Nota sui template Wan e i 4 step (lightx2v).** I template ufficiali Wan 2.2 usano 20 step senza LoRA: fai prima la prova **di base** (tempo di riferimento). Poi la prova **veloce** con i LoRA già scaricati: aggiungi un `LoraLoaderModelOnly` prima di ciascuno dei due campionatori (LoRA `*_high_noise` sul modello high-noise, `*_low_noise` su quello low-noise), `cfg = 1`, **4 step totali** (2 sul campionatore high-noise, 2 sul low-noise). È la ricetta comune della community: non l'ho potuta provare io, se non funziona dimmelo e la sistemiamo guardando il tuo workflow.
+**Nota sui template Wan e i LoRA lightx2v.** [MISURATO sui template installati, comfyui_workflow_templates_json 0.11.96, letti il 5 nov 2026] i template `video_wan2_2_14B_t2v` e `video_wan2_2_14B_i2v` contengono già due nodi `LoraLoaderModelOnly` con i LoRA lightx2v 4 step (forza 1.0), e i file del template coincidono con i nomi del manifest: diffusione `wan2.2_{i2v,t2v}_{high,low}_noise_14B_fp8_scaled`, LoRA `wan2.2_i2v_lightx2v_4steps_lora_v1_{high,low}_noise` e `wan2.2_t2v_lightx2v_4steps_lora_v1.1_{high,low}_noise`, text encoder `umt5_xxl_fp8_e4m3fn_scaled`, VAE `wan_2.1_vae`. Quindi la prova «veloce» è il template **così com'è**: annota gli step e il cfg che trovi nei campionatori (non li ho letti). La prova «di base» (senza LoRA) è facoltativa: bypassa i due nodi LoRA e usa gli step e il cfg consigliati nelle note del template; se non li trovi, salta quella riga: il tempo che conta per i costi è quello con i LoRA. (La pagina docs.comfy.org su Wan 2.2 cita per l'I2V i file fp16, ma il template reale usa fp8_scaled.)
 
 Compila (una riga per prova):
 
 | # | Risoluzione | Frame @ fps | Step | Freddo (s) | Caldo (s) | Picco VRAM | Esito / qualità |
 |---|---|---|---|---|---|---|---|
-| 1 base | | | 20 | | | | |
-| 1 lightx2v | | | 4 | | | | |
-| 2 base | | | 20 | | | | |
-| 2 lightx2v | | | 4 | | | | |
+| 1 con LoRA (template) | | | | | | | |
+| 1 base, facoltativa (LoRA bypassati) | | | | | | | |
+| 2 con LoRA (template) | | | | | | | |
+| 2 base, facoltativa (LoRA bypassati) | | | | | | | |
 | 3 | | | | | | | |
 | 4 | | | | | | | |
 | 5 | | | | | | | |
