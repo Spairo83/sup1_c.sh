@@ -135,3 +135,28 @@ Aggiungi una quota per setup/idle se vuoi il costo reale per sessione. Con i tuo
 - [ ] Almeno una prova T2V e una I2V funzionanti per **Wan 2.2**; per LTX-2.5 e HunyuanVideo 1.5 funzionanti oppure motivo del fallimento annotato
 - [ ] Tempi caldi e disco misurati per ogni modello
 - [ ] Save/load workflow funzionante, token solo in `~/.github_config` (600)
+
+---
+
+## Appendice — Piano C: Vast.ai (NON collaudato)
+
+Stato: l'adattamento dello script è provato solo in locale (simulazione del template). Serve una prova su una macchina vera prima di fidarsene.
+
+### Cosa è stato verificato dalla documentazione Vast.ai (5 nov 2026)
+- Il template ufficiale **«ComfyUI»** ha ComfyUI in `/workspace/ComfyUI`, porta interna **18188**, accesso dal pulsante **OPEN** (Instance Portal), autenticazione a token, variabile **`PROVISIONING_SCRIPT`** (URL raw di uno script bash) e variabile **`HF_TOKEN`** per i modelli gated.
+- **«Hosts can technically access files on their machines.»** Per dati sensibili la documentazione consiglia «verified datacenters» e di cifrare i dati critici.
+- **Stop** tiene i dati e **continua a fatturare lo storage**; la GPU può essere riassegnata ad altri e il riavvio può restare in attesa «indefinitely». **Destroy** cancella tutto.
+- Il disco si fissa alla creazione e **non si ridimensiona** dopo (guida di terzi, nov 2025).
+- Il traffico dati è fatturato a TB e **varia per host** (esempio di terzi: 20 $/TB): per 100+ GB di modelli può pesare. Filtra gli host per costo di download.
+
+### Come provarlo
+1. Console Vast → Search: GPU con **almeno 48 GB** (o 24 GB se vuoi solo FLUX e Wan 5B), filtro **datacenter / Secure Cloud**, disco **200 GB** (scelto prima del noleggio), filtro sul costo di download.
+2. Template **ComfyUI**. Nelle variabili d'ambiente del template: `PROVISIONING_SCRIPT=https://raw.githubusercontent.com/Spairo83/sup1_c.sh/refs/heads/v1.1/sup1_c.sh`, `VIDEO_MODELS=wan` (e per LTX-2.5 `HF_TOKEN=<il tuo token HF di sola lettura>`: scrivilo tu nel pannello del template, mai in chat, e **non rendere pubblico il template**).
+3. Quando l'istanza è pronta: pulsante **OPEN**, poi ComfyUI dal portale. Se i nodi nuovi non compaiono, riavvia ComfyUI dal portale. I modelli nuovi si ricaricano con **R**.
+4. Verifica da terminale (Jupyter o SSH): `bash ~/check_setup.sh` e `bash ~/report_setup.sh`.
+5. Fai le stesse prove del punto 4 del piano principale.
+6. A fine prova **Destroy** (non Stop) se non vuoi pagare lo storage, dopo aver scaricato i risultati.
+
+### Da non dimenticare su Vast
+- Il token GitHub per `save_workflows.sh` finisce su una macchina dell'host: usa un **token fine-grained limitato al solo repo dei workflow** (permesso Contents), non un token classico `repo`.
+- Da verificare nella prova: nome dell'ambiente Python del template (lo script cerca `/venv/main`), se ComfyUI è gestito da supervisor, se `start_comfy.sh` serve oppure no (nel template non va lanciato).

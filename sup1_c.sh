@@ -14,12 +14,21 @@
 #   SKIP_FLUX=1    non scarica FLUX.1-dev FP8 (17 GB)
 #   MARGIN_GB=10   spazio libero da lasciare dopo ogni gruppo di modelli
 #   UPDATE_COMFY=0 non aggiorna ComfyUI/custom nodes se già installati
-#   COMFY_DIR      cartella di installazione (default ~/ComfyUI)
+#   COMFY_DIR      cartella di installazione. Default: /workspace/ComfyUI se esiste /workspace
+#                  scrivibile (RunPod, Vast.ai), altrimenti ~/ComfyUI
+#   COMFY_PORT     porta di ComfyUI per start_comfy.sh (default 8188)
 #   VERIFY_ONLY=1  NON installa: controlla solo che tutti gli URL rispondano
 #   DRY_RUN=1      NON scarica: mostra cosa farebbe (fascia GPU, modelli, spazio)
 #   HF_TOKEN       token Hugging Face (sola lettura), serve SOLO per LTX-2.5.
 #                  Meglio: file ~/.hf_config con riga  HF_TOKEN=hf_xxx  (chmod 600);
 #                  se manca, lo script lo chiede in modo nascosto da terminale.
+#
+# VAST.AI (v1.1, NON ancora collaudato): usa il template ufficiale «ComfyUI», che ha già
+# ComfyUI in /workspace/ComfyUI e un ambiente Python pronto. Due modi:
+#   a) incolla l'URL raw di questo script nella variabile PROVISIONING_SCRIPT del template
+#      e aggiungi VIDEO_MODELS=... (e, per LTX-2.5, HF_TOKEN) tra le variabili d'ambiente;
+#   b) da terminale Jupyter/SSH:  curl -sSL <URL raw> | VIDEO_MODELS=wan bash
+# In quel caso lo script NON ricrea ComfyUI né aggiorna pip: aggiunge nodi e modelli.
 # ═══════════════════════════════════════════════════════════════════════
 
 # NIENTE "set -e": gli errori sono gestiti uno per uno e riepilogati alla fine.
@@ -27,9 +36,24 @@
 set -uo pipefail
 
 VERSION="1.1"
-COMFY_DIR="${COMFY_DIR:-$HOME/ComfyUI}"
+# Cartella: /workspace (RunPod, Vast.ai) se usabile, altrimenti la home
+if [ -z "${COMFY_DIR:-}" ]; then
+    if [ -d /workspace/ComfyUI ] || { [ -d /workspace ] && [ -w /workspace ]; }; then
+        COMFY_DIR="/workspace/ComfyUI"
+    else
+        COMFY_DIR="$HOME/ComfyUI"
+    fi
+fi
+COMFY_PORT="${COMFY_PORT:-8188}"
+# Ambiente "gestito" (template Vast.ai): ComfyUI già presente + venv del template.
+# Lì non si aggiorna pip né ComfyUI di default: lo ha già preparato il template.
+MANAGED_ENV=0
+if [ -f "$COMFY_DIR/main.py" ] && { [ -f /venv/main/bin/activate ] || [ -n "${VAST_CONTAINERLABEL:-}" ]; }; then
+    MANAGED_ENV=1
+fi
+[ -f /venv/main/bin/activate ] && . /venv/main/bin/activate 2>/dev/null   # venv del template Vast.ai (da verificare in collaudo)
 MARGIN_GB="${MARGIN_GB:-10}"
-UPDATE_COMFY="${UPDATE_COMFY:-1}"
+UPDATE_COMFY="${UPDATE_COMFY:-$([ "$MANAGED_ENV" = 1 ] && echo 0 || echo 1)}"
 SKIP_FLUX="${SKIP_FLUX:-0}"
 VERIFY_ONLY="${VERIFY_ONLY:-0}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -371,8 +395,12 @@ cd "$COMFY_DIR" || exit 1
 
 # ── [3/9] Dipendenze Python ────────────────────────────────────────────
 echo "[3/9] 🐍 Dipendenze Python..."
-pip_install --upgrade pip setuptools wheel || warn "pip upgrade non riuscito (non critico)"
-if ! pip_install -r requirements.txt; then err "pip install -r requirements.txt fallito"; FAILED_FILES+=("pip: requirements.txt di ComfyUI"); fi
+if [ "$MANAGED_ENV" = 1 ] && [ "$UPDATE_COMFY" != "1" ]; then
+    log "Ambiente del template rilevato: salto l'aggiornamento di pip e dei requirements di ComfyUI"
+else
+    pip_install --upgrade pip setuptools wheel || warn "pip upgrade non riuscito (non critico)"
+    if ! pip_install -r requirements.txt; then err "pip install -r requirements.txt fallito"; FAILED_FILES+=("pip: requirements.txt di ComfyUI"); fi
+fi
 "$PYTHON_BIN" - <<'PYEOF' 2>/dev/null || warn "PyTorch con CUDA non disponibile: ComfyUI girerà su CPU (controlla l'immagine dell'istanza)"
 import torch, sys
 sys.exit(0 if torch.cuda.is_available() else 1)
@@ -428,6 +456,9 @@ done
 
 # ── [9/9] Script di utilità ────────────────────────────────────────────
 echo "[9/9] 📋 Script di utilità..."
+printf 'COMFY_DIR=%q
+COMFY_PORT=%q
+' "$COMFY_DIR" "$COMFY_PORT" > "$HOME/.sup1_env"
 write_helper_scripts
 cd "$HOME" || true
 
@@ -446,7 +477,13 @@ else
     echo "  ✅ Nessun errore"
 fi
 echo ""
-echo "  🚀 Avvia ComfyUI:        bash ~/start_comfy.sh"
+if [ "$MANAGED_ENV" = 1 ]; then
+    echo "  ℹ️  Template Vast.ai: ComfyUI è già gestito dal template. Apri ComfyUI dal portale (pulsante OPEN),"
+    echo "     premi R per ricaricare i modelli; per i NUOVI NODI riavvia ComfyUI dal portale."
+    echo "     NON lanciare start_comfy.sh: avvierebbe una seconda copia sulla stessa GPU."
+else
+    echo "  🚀 Avvia ComfyUI:        bash ~/start_comfy.sh"
+fi
 echo "  🔍 Verifica modelli:     bash ~/check_setup.sh"
 echo "  📊 Rapporto collaudo:    bash ~/report_setup.sh"
 echo "  💾 Salva workflow:       bash ~/save_workflows.sh   (carica: bash ~/load_workflows.sh)"
@@ -493,32 +530,42 @@ verify_urls() {
 write_helper_scripts() {
 cat > ~/start_comfy.sh << 'EOF'
 #!/bin/bash
+[ -f ~/.sup1_env ] && . ~/.sup1_env
+COMFY_DIR="${COMFY_DIR:-$HOME/ComfyUI}"; COMFY_PORT="${COMFY_PORT:-8188}"
 # Avvia ComfyUI. Log in ~/comfy.log (da lì report_setup.sh legge i tempi "Prompt executed in").
 # Argomenti extra: COMFY_EXTRA_ARGS="--lowvram" bash ~/start_comfy.sh
 echo "🔥 Avvio ComfyUI..."
-cd ~/ComfyUI || exit 1
-if pgrep -f "python.*main.py.*--port 8188" > /dev/null; then
+if [ -f /venv/main/bin/activate ]; then . /venv/main/bin/activate 2>/dev/null; fi
+if pgrep -f "supervisord" >/dev/null 2>&1 && pgrep -af "main.py" 2>/dev/null | grep -q "18188"; then
+    echo "⚠️  ComfyUI è già in esecuzione dal template Vast.ai (porta 18188). Usa il pulsante OPEN del portale."
+    echo "    Per avviarne comunque una seconda copia: FORCE_START=1 bash ~/start_comfy.sh"
+    [ "${FORCE_START:-0}" = "1" ] || exit 0
+fi
+cd "$COMFY_DIR" || exit 1
+if pgrep -f "python.*main.py.*--port $COMFY_PORT" > /dev/null; then
     echo "⚠️  ComfyUI già in esecuzione, lo fermo..."
-    pkill -f "python.*main.py.*--port 8188"
+    pkill -f "python.*main.py.*--port $COMFY_PORT"
     sleep 3
 fi
 echo "🚀 Avvio in corso (log: ~/comfy.log)..."
 # shellcheck disable=SC2086
-python main.py --listen 0.0.0.0 --port 8188 --enable-cors-header "*" ${COMFY_EXTRA_ARGS:-} 2>&1 | tee -a ~/comfy.log
+python main.py --listen 0.0.0.0 --port $COMFY_PORT --enable-cors-header "*" ${COMFY_EXTRA_ARGS:-} 2>&1 | tee -a ~/comfy.log
 EOF
 chmod +x ~/start_comfy.sh
 
 cat > ~/check_setup.sh << 'EOF'
 #!/bin/bash
+[ -f ~/.sup1_env ] && . ~/.sup1_env
+COMFY_DIR="${COMFY_DIR:-$HOME/ComfyUI}"; COMFY_PORT="${COMFY_PORT:-8188}"
 # Verifica i modelli elencati nel manifest scritto dallo script di installazione.
-M=~/ComfyUI/.sup1_manifest
+M="$COMFY_DIR/.sup1_manifest"
 echo "══════════════════════════════════════════════"
 echo "🔍 VERIFICA SETUP"
 echo "══════════════════════════════════════════════"
 if [ ! -s "$M" ]; then echo "❌ Manifest assente: rilancia sup1_c.sh"; exit 1; fi
 missing=0
 while IFS='|' read -r comp folder name size auth urls; do
-    f=~/ComfyUI/models/$folder/$name
+    f="$COMFY_DIR/models/$folder/$name"
     if [ -s "$f" ]; then
         printf '✅ [%s] %s (%s)\n' "$comp" "$name" "$(du -h "$f" | cut -f1)"
     else
@@ -527,7 +574,7 @@ while IFS='|' read -r comp folder name size auth urls; do
 done < "$M"
 echo ""
 echo "🔌 CUSTOM NODES:"
-for node in ~/ComfyUI/custom_nodes/*/; do [ -d "$node" ] && echo "✅ $(basename "$node")"; done
+for node in "$COMFY_DIR"/custom_nodes/*/; do [ -d "$node" ] && echo "✅ $(basename "$node")"; done
 echo ""
 echo "💽 Spazio libero: $(df -h ~ | awk 'NR==2{print $4}')"
 [ $missing -eq 0 ] && echo "✅ Tutti i modelli pianificati sono presenti" || echo "⚠️  $missing file mancanti: rilancia il comando di installazione"
@@ -536,36 +583,40 @@ chmod +x ~/check_setup.sh
 
 cat > ~/fix_common_issues.sh << 'EOF'
 #!/bin/bash
+[ -f ~/.sup1_env ] && . ~/.sup1_env
+COMFY_DIR="${COMFY_DIR:-$HOME/ComfyUI}"; COMFY_PORT="${COMFY_PORT:-8188}"
 echo "🔧 RISOLUZIONE PROBLEMI AUTOMATICA"
 echo "──────────────────────────────────────"
 echo "1. Controllo processi ComfyUI..."
-if pgrep -f "python.*main.py.*--port 8188" > /dev/null; then
+if pgrep -f "python.*main.py.*--port $COMFY_PORT" > /dev/null; then
     echo "   Processo trovato, lo fermo..."
-    pkill -f "python.*main.py.*--port 8188"
+    pkill -f "python.*main.py.*--port $COMFY_PORT"
     sleep 3
 fi
-echo "2. Verifica porta 8188..."
-if command -v lsof >/dev/null 2>&1 && lsof -ti:8188 >/dev/null 2>&1; then
+echo "2. Verifica porta $COMFY_PORT..."
+if command -v lsof >/dev/null 2>&1 && lsof -ti:$COMFY_PORT >/dev/null 2>&1; then
     echo "   Porta occupata, libero..."
-    kill -9 $(lsof -ti:8188) 2>/dev/null || true
+    kill -9 $(lsof -ti:$COMFY_PORT) 2>/dev/null || true
 fi
 echo "3. Fix permessi directory..."
-chmod -R u+rwX ~/ComfyUI/models 2>/dev/null || true
+chmod -R u+rwX "$COMFY_DIR/models" 2>/dev/null || true
 echo "4. Pulizia cache Python..."
-find ~/ComfyUI -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+find "$COMFY_DIR" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 echo "5. File .part (download interrotti)..."
-find ~/ComfyUI/models -name "*.part" 2>/dev/null | while read -r p; do echo "   trovato: $p (rilancia sup1_c.sh per riprendere)"; done
+find "$COMFY_DIR/models" -name "*.part" 2>/dev/null | while read -r p; do echo "   trovato: $p (rilancia sup1_c.sh per riprendere)"; done
 echo "✅ Fix automatici completati — prova: bash ~/start_comfy.sh"
 EOF
 chmod +x ~/fix_common_issues.sh
 
 cat > ~/backup_workflows.sh << 'EOF'
 #!/bin/bash
+[ -f ~/.sup1_env ] && . ~/.sup1_env
+COMFY_DIR="${COMFY_DIR:-$HOME/ComfyUI}"; COMFY_PORT="${COMFY_PORT:-8188}"
 # Copia locale dei workflow in ~/workflow_backup (alternativa offline a save_workflows.sh)
 echo "💾 BACKUP LOCALE WORKFLOWS"
 WORKFLOW_DIRS=(
-    "$HOME/ComfyUI/user/default/workflows"
-    "$HOME/ComfyUI/user/workflows"
+    "$COMFY_DIR/user/default/workflows"
+    "$COMFY_DIR/user/workflows"
 )
 found=false
 for dir in "${WORKFLOW_DIRS[@]}"; do
@@ -587,6 +638,8 @@ chmod +x ~/backup_workflows.sh
 # ── libreria comune per il sistema GitHub [FGH]: il token sta SOLO in ~/.github_config (chmod 600)
 cat > ~/.sup1_github_lib.sh << 'EOF'
 #!/bin/bash
+[ -f ~/.sup1_env ] && . ~/.sup1_env
+COMFY_DIR="${COMFY_DIR:-$HOME/ComfyUI}"; COMFY_PORT="${COMFY_PORT:-8188}"
 # Sorgente comune di save_workflows.sh / load_workflows.sh
 GH_CFG="$HOME/.github_config"
 GH_TMP=()
@@ -648,7 +701,7 @@ git config user.email "${GITHUB_USER}@users.noreply.github.com"
 git rev-parse HEAD >/dev/null 2>&1 || git checkout -q -B main
 
 copied=0
-for src in "$HOME/ComfyUI/user/default/workflows" "$HOME/ComfyUI/user/workflows"; do
+for src in "$COMFY_DIR/user/default/workflows" "$COMFY_DIR/user/workflows"; do
     [ -d "$src" ] || continue
     while IFS= read -r -d '' f; do
         rel="${f#"$src"/}"
@@ -658,7 +711,7 @@ for src in "$HOME/ComfyUI/user/default/workflows" "$HOME/ComfyUI/user/workflows"
 done
 [ -f README.md ] || printf '# ComfyUI Workflows Privati\n\nContenuto privato (anche NSFW).\n' > README.md
 
-if [ "$copied" -eq 0 ]; then echo "ℹ️  Nessun workflow locale da salvare (cerco in ~/ComfyUI/user/default/workflows)"; fi
+if [ "$copied" -eq 0 ]; then echo "ℹ️  Nessun workflow locale da salvare (cerco in $COMFY_DIR/user/default/workflows)"; fi
 git add -A
 if git diff --cached --quiet; then echo "✅ Nessuna modifica rispetto al repo"; exit 0; fi
 git commit -q -m "Backup workflows $(date '+%Y-%m-%d %H:%M:%S')"
@@ -670,10 +723,10 @@ chmod +x ~/save_workflows.sh
 
 cat > ~/load_workflows.sh << 'EOF'
 #!/bin/bash
-# Scarica i workflow dal repo GitHub privato in ~/ComfyUI/user/default/workflows (non cancella nulla in locale)
+# Scarica i workflow dal repo GitHub privato in $COMFY_DIR/user/default/workflows (non cancella nulla in locale)
 . ~/.sup1_github_lib.sh || exit 1
 gh_load_config || exit 1
-DEST="$HOME/ComfyUI/user/default/workflows"
+DEST="$COMFY_DIR/user/default/workflows"
 mkdir -p "$DEST"
 WORK="$(mktemp -d)"; GH_TMP+=("$WORK")
 if git clone --quiet --depth 1 "$GH_URL" "$WORK/repo" </dev/null 2>/dev/null; then
@@ -693,14 +746,16 @@ chmod +x ~/load_workflows.sh
 
 cat > ~/report_setup.sh << 'EOF'
 #!/bin/bash
+[ -f ~/.sup1_env ] && . ~/.sup1_env
+COMFY_DIR="${COMFY_DIR:-$HOME/ComfyUI}"; COMFY_PORT="${COMFY_PORT:-8188}"
 # Rapporto per il collaudo: GPU, disco, spazio per cartella modelli, ultimi tempi di generazione.
 echo "══════════ RAPPORTO COLLAUDO ($(date '+%Y-%m-%d %H:%M')) ══════════"
 echo "GPU:   $(nvidia-smi --query-gpu=name,memory.total,memory.used --format=csv,noheader 2>/dev/null)"
 echo "Disco: $(df -h ~ | awk 'NR==2{print "usato "$3" / "$2", liberi "$4}')"
 echo ""
 echo "Spazio per cartella modelli:"
-du -sh ~/ComfyUI/models/* 2>/dev/null | sed 's/^/   /'
-echo "   TOTALE modelli: $(du -sh ~/ComfyUI/models 2>/dev/null | cut -f1)"
+du -sh "$COMFY_DIR"/models/* 2>/dev/null | sed 's/^/   /'
+echo "   TOTALE modelli: $(du -sh "$COMFY_DIR/models" 2>/dev/null | cut -f1)"
 echo ""
 echo "Ultimi tempi di generazione (da ~/comfy.log):"
 grep -E "Prompt executed in" ~/comfy.log 2>/dev/null | tail -10 | sed 's/^/   /' || true
